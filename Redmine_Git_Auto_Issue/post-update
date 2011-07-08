@@ -1,0 +1,56 @@
+#!/bin/sh
+#Author: Egemen Gozoglu egemen@egemengozoglu.com
+#Date: 08.07.2011
+
+#Renk Kodları
+BOLD="\\033[1;39m"
+NORMAL="\\033[0;39m"
+RED="\\033[31m"
+
+#Database variables
+db_socket=/home/egemen/redmine-1.2.0-0/mysql/tmp/mysql.sock
+db_username=bitnami
+db_name=bitnami_redmine
+db_password=3e79743af9
+server_ip=`ifconfig | grep 'inet addr:'| grep -v '127.0.0.1' | cut -d: -f2 | awk '{print $1}'`
+
+commit_message=$(git show --format=format:%s | head -1)
+commit_id=$(git rev-parse HEAD)
+
+issue_id_tmp=$(echo $commit_message | awk -F " " '{print $1}')
+issue_id=$(echo $issue_id_tmp | awk -F ":" '{print $2}')
+
+if [ "$issue_id" = ''  ];then
+    echo $BOLD$RED"Invalid issue number. No Redmine update will be made."$NORMAL
+	echo $BOLD$RED"Please start your commmit message like the following format:"$NORMAL;
+	echo $BOLD$RED"Issue:<issue_number> ....."$NORMAL
+	echo $BOLD$RED"Ony push to your repository will be processed."$NORMAL
+	exit 1;
+fi
+
+count_issue=`mysql --socket=$db_socket -u $db_username $db_name --password=$db_password -e "SELECT COUNT(*) from issues WHERE id = $issue_id"`
+
+check_issue=$(echo $count_issue | awk -F " " '{print $2}')
+
+if [ "$check_issue" = '0'  ];then
+    echo $BOLD$RED"No issue with is found with the issue number you provided!"$NORMAL
+	echo $BOLD$RED"No Redmine update will be made."$NORMAL
+	echo $BOLD$RED"Ony push to your repository will be processed."$NORMAL
+	exit 1;
+fi
+
+commit_date=$(date);
+
+old_desc=`mysql --skip-column-names --socket=$db_socket -u $db_username $db_name --password=$db_password -e "SELECT description FROM issues WHERE id = $issue_id"`
+
+project_id_tmp=`mysql --socket=$db_socket -u $db_username $db_name --password=$db_password -e "SELECT project_id FROM issues WHERE id = $issue_id"`
+
+project_id=`echo $project_id_tmp | awk -F "project_id " '{print $2}'`
+
+project_html_tmp=`mysql --socket=$db_socket -u $db_username $db_name --password=$db_password -e "SELECT identifier FROM projects WHERE id = $project_id"`
+
+project_html=`echo $project_html_tmp | awk -F "identifier " '{print $2}'`
+
+mysql --socket=$db_socket -u $db_username $db_name --password=$db_password << EOFMYSQL
+UPDATE issues SET description = 'Commit Date: $commit_date \n Commit History: \"$commit_id\":http://$server_ip:8080/redmine/projects/$project_html/repository/revisions/$commit_id \n Diff: \"$commit_id\":http://$server_ip:8080/redmine/projects/$project_html/repository/revisions/$commit_id/diff \n Commit Message: $commit_message \n\n $old_desc ' WHERE id = $issue_id;
+EOFMYSQL
